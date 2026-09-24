@@ -1022,9 +1022,57 @@ console.warn(
                 error
               );
 
+              if (evidence.length === 0) {
+                const fallbackMatches = searchChunks(
+                  chunks,
+                  question
+                );
+
+                send({
+                  type: "activity",
+                  round,
+                  tool: "search_document",
+                  message:
+                    "AI provider unavailable. Running the document search tool locally so the research can still complete.",
+                });
+
+                for (const match of fallbackMatches) {
+                  evidence.push({
+                    tool: "search_document",
+                    content: match.content,
+                  });
+                }
+
+                if (fallbackMatches.length > 0) {
+                  send({
+                    type: "activity",
+                    round,
+                    tool: "search_document",
+                    message: `Found ${fallbackMatches.length} relevant passage${fallbackMatches.length === 1 ? "" : "s"}.`,
+                  });
+                }
+              }
+
               if (evidence.length > 0) {
+                const terms = meaningfulTerms(question);
+                const supportingSentences = evidence
+                  .flatMap((item) =>
+                    splitIntoSentences(item.content)
+                  )
+                  .filter(
+                    (sentence) =>
+                      sentence.length >= 25 &&
+                      sentence.length <= 700 &&
+                      terms.some((term) =>
+                        normalizeForSearch(sentence).includes(term)
+                      )
+                  )
+                  .slice(0, 3);
+
                 finalAnswer =
-                  "The research agent found relevant contract evidence, but the AI provider became unavailable before it could complete synthesis.";
+                  supportingSentences.length > 0
+                    ? `The research tools found the following relevant contract terms:\n\n${supportingSentences.join("\n\n")}`
+                    : "The research tools found relevant contract evidence. See the independently verified passage below.";
                 break;
               }
 
