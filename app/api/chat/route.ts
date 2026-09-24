@@ -440,6 +440,91 @@ ${accumulatedAnswer}
             }
           } catch (e) {
             console.error("Citation verification logic failed:", e);
+
+            // The citation-model call can fail independently (for example, a temporary
+            // provider 503). In that case, still verify literal evidence locally.
+            if (verifiedCitationsData.length === 0) {
+              console.log("[Citation] Citation model failed. Attempting local deterministic fallback...");
+
+              const questionTerms = getMeaningfulTerms(question);
+              const answerTerms = getMeaningfulTerms(accumulatedAnswer);
+              const sourceText = fullDocumentCoverage
+                ? document.extractedText
+                : selectedChunks.map((chunk) => chunk.content).join("\\n\\n");
+
+              const passages = sourceText
+                .split(/(?<=[.!?])\\s+/)
+                .map((passage: string) => passage.trim())
+                .filter((passage: string) => passage.length >= 30 && passage.length <= 600);
+
+              const rankedPassages = passages
+                .map((passage: string) => {
+                  const lower = passage.toLowerCase();
+                  let score = 0;
+                  for (const term of questionTerms) {
+                    if (lower.includes(term)) score += 2;
+                  }
+                  for (const term of answerTerms) {
+                    if (lower.includes(term)) score += 1;
+                  }
+                  return { passage, score };
+                })
+                .filter((item: { passage: string; score: number }) => item.score >= 3)
+                .sort((a: { score: number }, b: { score: number }) => b.score - a.score);
+
+              for (const item of rankedPassages.slice(0, 5)) {
+                const offsets = findQuoteOffsets(document.extractedText, item.passage);
+                if (!offsets) continue;
+
+                const duplicate = verifiedCitationsData.some(
+                  (citation) =>
+                    citation.startChar === offsets.startChar &&
+                    citation.endChar === offsets.endChar
+                );
+                if (duplicate) continue;
+
+                let pageNumber = null;
+                for (const chunk of document.chunks) {
+                  if (
+                    offsets.startChar >= chunk.startChar &&
+                    offsets.startChar <= chunk.endChar
+                  ) {
+                    pageNumber = chunk.pageNumber;
+                    break;
+                  }
+                }
+
+                const citation = await prisma.citation.create({
+                  data: {
+                    messageId: assistantMessage.id,
+                    documentId: document.id,
+                    quote: document.extractedText.substring(
+                      offsets.startChar,
+                      offsets.endChar
+                    ),
+                    verified: true,
+                    startChar: offsets.startChar,
+                    endChar: offsets.endChar,
+                    pageNumber,
+                  },
+                });
+
+                verifiedCitationsData.push({
+                  id: citation.id,
+                  quote: citation.quote,
+                  verified: true,
+                  startChar: citation.startChar,
+                  endChar: citation.endChar,
+                  pageNumber: citation.pageNumber,
+                });
+
+                if (verifiedCitationsData.length >= 2) break;
+              }
+
+              console.log(
+                `[Citation] Local failure fallback verified ${verifiedCitationsData.length} citation(s).`
+              );
+            }
           }
         }
 
