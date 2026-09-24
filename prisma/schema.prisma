@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Document {
+  id            String   @id @default(cuid())
+  name          String
+  originalName  String
+  mimeType      String
+  size          Int
+  extractedText String
+  status        String   @default("PROCESSING")
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  chunks    DocumentChunk[]
+  chats     Chat[]
+  citations Citation[]
+}
+
+model DocumentChunk {
+  id         String @id @default(cuid())
+  documentId String
+  content    String
+  chunkIndex Int
+  startChar  Int
+  endChar    Int
+  pageNumber Int?
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
+}
+
+model Chat {
+  id         String   @id @default(cuid())
+  documentId String
+  title      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  document Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([documentId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  chatId    String
+  role      String
+  content   String
+  stopped   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  chat      Chat       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  citations Citation[]
+
+  @@index([chatId])
+}
+
+model Citation {
+  id         String   @id @default(cuid())
+  messageId  String
+  documentId String
+  quote      String
+  verified   Boolean  @default(false)
+  startChar  Int?
+  endChar    Int?
+  pageNumber Int?
+  createdAt  DateTime @default(now())
+
+  message  Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@index([documentId])
+}

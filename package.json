@@ -9,17 +9,27 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/genai": "^2.24.0",
+    "@prisma/adapter-better-sqlite3": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "better-sqlite3": "^13.0.3",
+    "mammoth": "^1.12.3",
     "next": "16.3.6",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^6.3.289",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "^9.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.6",
+    "prisma": "^7.10.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
