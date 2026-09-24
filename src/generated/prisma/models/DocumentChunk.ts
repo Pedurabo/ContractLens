@@ -504,6 +504,7 @@ export type DocumentChunkCreateOrConnectWithoutDocumentInput = {
 
 export type DocumentChunkCreateManyDocumentInputEnvelope = {
   data: Prisma.DocumentChunkCreateManyDocumentInput | Prisma.DocumentChunkCreateManyDocumentInput[]
+  skipDuplicates?: boolean
 }
 
 export type DocumentChunkUpsertWithWhereUniqueWithoutDocumentInput = {
@@ -1305,6 +1306,7 @@ export type DocumentChunkCreateManyArgs<ExtArgs extends runtime.Types.Extensions
    * The data used to create many DocumentChunks.
    */
   data: Prisma.DocumentChunkCreateManyInput | Prisma.DocumentChunkCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1323,6 +1325,7 @@ export type DocumentChunkCreateManyAndReturnArgs<ExtArgs extends runtime.Types.E
    * The data used to create many DocumentChunks.
    */
   data: Prisma.DocumentChunkCreateManyInput | Prisma.DocumentChunkCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

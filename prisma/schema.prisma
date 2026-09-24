@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
 model Document {
@@ -83,3 +83,4 @@ model Citation {
   @@index([messageId])
   @@index([documentId])
 }
+

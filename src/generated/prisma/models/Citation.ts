@@ -576,6 +576,7 @@ export type CitationCreateOrConnectWithoutDocumentInput = {
 
 export type CitationCreateManyDocumentInputEnvelope = {
   data: Prisma.CitationCreateManyDocumentInput | Prisma.CitationCreateManyDocumentInput[]
+  skipDuplicates?: boolean
 }
 
 export type CitationUpsertWithWhereUniqueWithoutDocumentInput = {
@@ -638,6 +639,7 @@ export type CitationCreateOrConnectWithoutMessageInput = {
 
 export type CitationCreateManyMessageInputEnvelope = {
   data: Prisma.CitationCreateManyMessageInput | Prisma.CitationCreateManyMessageInput[]
+  skipDuplicates?: boolean
 }
 
 export type CitationUpsertWithWhereUniqueWithoutMessageInput = {
@@ -1498,6 +1500,7 @@ export type CitationCreateManyArgs<ExtArgs extends runtime.Types.Extensions.Inte
    * The data used to create many Citations.
    */
   data: Prisma.CitationCreateManyInput | Prisma.CitationCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1516,6 +1519,7 @@ export type CitationCreateManyAndReturnArgs<ExtArgs extends runtime.Types.Extens
    * The data used to create many Citations.
    */
   data: Prisma.CitationCreateManyInput | Prisma.CitationCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */

@@ -408,6 +408,7 @@ export type ChatCreateOrConnectWithoutDocumentInput = {
 
 export type ChatCreateManyDocumentInputEnvelope = {
   data: Prisma.ChatCreateManyDocumentInput | Prisma.ChatCreateManyDocumentInput[]
+  skipDuplicates?: boolean
 }
 
 export type ChatUpsertWithWhereUniqueWithoutDocumentInput = {
@@ -1272,6 +1273,7 @@ export type ChatCreateManyArgs<ExtArgs extends runtime.Types.Extensions.Internal
    * The data used to create many Chats.
    */
   data: Prisma.ChatCreateManyInput | Prisma.ChatCreateManyInput[]
+  skipDuplicates?: boolean
 }
 
 /**
@@ -1290,6 +1292,7 @@ export type ChatCreateManyAndReturnArgs<ExtArgs extends runtime.Types.Extensions
    * The data used to create many Chats.
    */
   data: Prisma.ChatCreateManyInput | Prisma.ChatCreateManyInput[]
+  skipDuplicates?: boolean
   /**
    * Choose, which related nodes to fetch as well
    */
