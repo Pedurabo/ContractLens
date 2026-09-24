@@ -1,10 +1,14 @@
-import type { NextConfig } from "next";
+﻿import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Externalizing pdfjs-dist and better-sqlite3 is necessary for server-side
-  // Node.js environments to correctly handle dynamic imports (like workers)
-  // and native modules, especially when using Turbopack.
-  serverExternalPackages: ["pdfjs-dist", "better-sqlite3"],
+  // Keep PDF parsing and native canvas dependencies out of the
+  // Turbopack server bundle. They will be loaded by Node.js at runtime.
+  serverExternalPackages: [
+    "pdf-parse",
+    "pdfjs-dist",
+    "@napi-rs/canvas",
+    "better-sqlite3",
+  ],
 };
 
 export default nextConfig;
