@@ -181,11 +181,36 @@ User Question: ${question}
         let isStopped = false;
 
         try {
-          const responseStream = await gemini.models.generateContentStream({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            config: { temperature: 0.1 },
-          });
+          let responseStream;
+          const MAX_STREAM_ATTEMPTS = 3;
+
+          for (let attempt = 1; attempt <= MAX_STREAM_ATTEMPTS; attempt++) {
+            try {
+              responseStream = await gemini.models.generateContentStream({
+                model: GEMINI_MODEL,
+                contents: prompt,
+                config: { temperature: 0.1 },
+              });
+              break;
+            } catch (error: any) {
+              const status = error?.status ?? error?.error?.code;
+              const retryable = status === 503 || status === 429;
+
+              if (!retryable || attempt === MAX_STREAM_ATTEMPTS) {
+                throw error;
+              }
+
+              const delayMs = 750 * Math.pow(2, attempt - 1);
+              console.warn(
+                `[Chat] Gemini stream attempt ${attempt} failed with status ${status}. Retrying in ${delayMs}ms...`
+              );
+              await new Promise((resolve) => setTimeout(resolve, delayMs));
+            }
+          }
+
+          if (!responseStream) {
+            throw new Error("Gemini stream could not be started.");
+          }
 
           controller.enqueue(
             encoder.encode(JSON.stringify({
