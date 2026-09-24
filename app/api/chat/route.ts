@@ -183,7 +183,7 @@ User Question: ${question}
 
         try {
           let responseStream;
-          const MAX_STREAM_ATTEMPTS = 3;
+          const MAX_STREAM_ATTEMPTS = 1;
           const fallbackModels = [
             "gemini-3.8-flash",
             "gemini-3.7-flash",
@@ -224,17 +224,9 @@ User Question: ${question}
                   break;
                 }
 
-                if (attempt < MAX_STREAM_ATTEMPTS) {
-                  const delayMs = 750 * Math.pow(2, attempt - 1);
-                  console.warn(
-                    `[Chat] Model ${model} attempt ${attempt} failed with status ${status}. Retrying in ${delayMs}ms...`
-                  );
-                  await new Promise((resolve) => setTimeout(resolve, delayMs));
-                } else {
-                  console.warn(
-                    `[Chat] Model ${model} remained unavailable after ${MAX_STREAM_ATTEMPTS} attempts. Trying next fallback model.`
-                  );
-                }
+                console.warn(
+                  `[Chat] Model ${model} unavailable with status ${status}. Trying next fallback model immediately.`
+                );
               }
             }
           }
@@ -312,11 +304,35 @@ Answer:
 ${accumulatedAnswer}
 `;
 
-            const quoteResponse = await gemini.models.generateContent({
-              model: activeModel,
-              contents: quotePrompt,
-              config: { temperature: 0.1 },
-            });
+            let quoteResponse: any = null;
+            const citationModels = [
+              activeModel,
+              GEMINI_MODEL,
+              "gemini-3.8-flash",
+              "gemini-3.7-flash",
+              "gemini-3.6-flash",
+              "gemini-3.5-flash",
+            ].filter((model, index, models) => models.indexOf(model) === index);
+
+            for (const model of citationModels) {
+              try {
+                quoteResponse = await gemini.models.generateContent({
+                  model,
+                  contents: quotePrompt,
+                  config: { temperature: 0.1 },
+                });
+                break;
+              } catch (error: any) {
+                const status = error?.status ?? error?.error?.code;
+                console.warn(
+                  `[Citation] Model ${model} failed with status ${status}. Trying next model immediately.`
+                );
+              }
+            }
+
+            if (!quoteResponse) {
+              throw new Error("Citation models unavailable; using local verification fallback.");
+            }
 
             const quoteText = quoteResponse.text || "";
             const jsonMatch = quoteText.match(/\[\s*[\s\S]*?\s*\]/);
