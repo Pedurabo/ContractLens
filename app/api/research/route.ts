@@ -643,13 +643,59 @@ if (startChar !== null) {
 }
 
 async function askAgent(prompt: string) {
-  const response =
-    await gemini.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-    });
+  const models = Array.from(
+    new Set([
+      GEMINI_MODEL,
+      "gemini-3.5-flash-lite",
+      "gemini-2.5-flash-lite",
+    ])
+  );
 
-  return response.text ?? "";
+  let lastError: unknown = null;
+
+  for (const model of models) {
+    try {
+      const response = await Promise.race([
+        gemini.models.generateContent({
+          model,
+          contents: prompt,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(
+              Object.assign(
+                new Error(`Gemini request timed out for ${model}.`),
+                { status: 504 }
+              )
+            ),
+            20000
+          )
+        ),
+      ]);
+
+      return response.text ?? "";
+    } catch (error: any) {
+      lastError = error;
+      const status = Number(
+        error?.status || error?.code || 0
+      );
+
+      if (
+        ![429, 500, 502, 503, 504].includes(status)
+      ) {
+        throw error;
+      }
+
+      console.warn(
+        `[Research] ${model} unavailable (${status}); trying fallback.`
+      );
+    }
+  }
+
+  throw (
+    lastError ||
+    new Error("No Gemini model is currently available.")
+  );
 }
 
 function buildAgentPrompt({
