@@ -182,34 +182,65 @@ User Question: ${question}
 
         try {
           let responseStream;
+          let activeModel = GEMINI_MODEL;
           const MAX_STREAM_ATTEMPTS = 3;
+          const fallbackModels = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+          ].filter((model) => model !== GEMINI_MODEL);
+          const modelsToTry = [GEMINI_MODEL, ...fallbackModels];
+          let lastStreamError: unknown = null;
 
-          for (let attempt = 1; attempt <= MAX_STREAM_ATTEMPTS; attempt++) {
-            try {
-              responseStream = await gemini.models.generateContentStream({
-                model: GEMINI_MODEL,
-                contents: prompt,
-                config: { temperature: 0.1 },
-              });
-              break;
-            } catch (error: any) {
-              const status = error?.status ?? error?.error?.code;
-              const retryable = status === 503 || status === 429;
+          modelLoop:
+          for (const model of modelsToTry) {
+            for (let attempt = 1; attempt <= MAX_STREAM_ATTEMPTS; attempt++) {
+              try {
+                responseStream = await gemini.models.generateContentStream({
+                  model,
+                  contents: prompt,
+                  config: { temperature: 0.1 },
+                });
+                activeModel = model;
+                if (model !== GEMINI_MODEL) {
+                  console.warn(`[Chat] Primary model unavailable. Using fallback model ${model}.`);
+                }
+                break modelLoop;
+              } catch (error: any) {
+                lastStreamError = error;
+                const status = error?.status ?? error?.error?.code;
+                const retryable =
+                  status === 429 ||
+                  status === 500 ||
+                  status === 502 ||
+                  status === 503 ||
+                  status === 504;
 
-              if (!retryable || attempt === MAX_STREAM_ATTEMPTS) {
-                throw error;
+                if (!retryable) {
+                  console.warn(
+                    `[Chat] Model ${model} failed with non-retryable status ${status}. Trying next fallback model.`
+                  );
+                  break;
+                }
+
+                if (attempt < MAX_STREAM_ATTEMPTS) {
+                  const delayMs = 750 * Math.pow(2, attempt - 1);
+                  console.warn(
+                    `[Chat] Model ${model} attempt ${attempt} failed with status ${status}. Retrying in ${delayMs}ms...`
+                  );
+                  await new Promise((resolve) => setTimeout(resolve, delayMs));
+                } else {
+                  console.warn(
+                    `[Chat] Model ${model} remained unavailable after ${MAX_STREAM_ATTEMPTS} attempts. Trying next fallback model.`
+                  );
+                }
               }
-
-              const delayMs = 750 * Math.pow(2, attempt - 1);
-              console.warn(
-                `[Chat] Gemini stream attempt ${attempt} failed with status ${status}. Retrying in ${delayMs}ms...`
-              );
-              await new Promise((resolve) => setTimeout(resolve, delayMs));
             }
           }
 
           if (!responseStream) {
-            throw new Error("Gemini stream could not be started.");
+            throw lastStreamError ?? new Error("No Gemini model could start the stream.");
           }
 
           controller.enqueue(
@@ -282,7 +313,7 @@ ${accumulatedAnswer}
 `;
 
             const quoteResponse = await gemini.models.generateContent({
-              model: GEMINI_MODEL,
+              model: activeModel,
               contents: quotePrompt,
               config: { temperature: 0.1 },
             });
