@@ -179,10 +179,10 @@ User Question: ${question}
       async start(controller) {
         let accumulatedAnswer = "";
         let isStopped = false;
+        let activeModel = GEMINI_MODEL;
 
         try {
           let responseStream;
-          let activeModel = GEMINI_MODEL;
           const MAX_STREAM_ATTEMPTS = 3;
           const fallbackModels = [
             "gemini-3.8-flash",
