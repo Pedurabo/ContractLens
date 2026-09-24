@@ -283,321 +283,94 @@ User Question: ${question}
 
         const verifiedCitationsData: any[] = [];
 
+        // Citation verification is deliberately local and deterministic.
+        // We never depend on a second AI request to decide whether evidence is genuine.
         if (!isStopped && accumulatedAnswer) {
-          try {
-            const quotePrompt = `You are an expert contract analyzer. Your task is to extract the EXACT verbatim quotations from the provided contract text that support the answer below.
+          const questionTerms = getMeaningfulTerms(question);
+          const answerTerms = getMeaningfulTerms(accumulatedAnswer);
+          const sourceText = fullDocumentCoverage
+            ? document.extractedText
+            : selectedChunks.map((chunk) => chunk.content).join("\n\n");
 
-INSTRUCTIONS:
-1. COPY supporting text DIRECTLY from the "Contract Content" section.
-2. DO NOT paraphrase, fix grammar, or change punctuation.
-3. DO NOT use ellipses (...) or skip words.
-4. Prefer short, complete sentences.
-5. If no exact match can be found, return an empty array [].
+          const rawPassages = sourceText
+            .split(/(?<=[.!?])\s+|\n+/)
+            .map((passage: string) => passage.trim())
+            .filter((passage: string) => passage.length >= 20 && passage.length <= 700);
 
-OUTPUT FORMAT:
-Return ONLY a valid JSON array of strings. Do not include markdown formatting or explanation.
+          const rankedPassages = rawPassages
+            .map((passage: string) => {
+              const lower = passage.toLowerCase();
+              let questionScore = 0;
+              let answerScore = 0;
 
-Contract Content:
-${contextText}
+              for (const term of questionTerms) {
+                if (lower.includes(term)) questionScore += 3;
+              }
+              for (const term of answerTerms) {
+                if (lower.includes(term)) answerScore += 1;
+              }
 
-Answer:
-${accumulatedAnswer}
-`;
+              return {
+                passage,
+                score: questionScore + answerScore,
+                questionScore,
+              };
+            })
+            .filter((item) => item.questionScore > 0 && item.score >= 4)
+            .sort((a, b) => b.score - a.score);
 
-            let quoteResponse: any = null;
-            const citationModels = [
-              activeModel,
-              GEMINI_MODEL,
-              "gemini-3.8-flash",
-              "gemini-3.7-flash",
-              "gemini-3.6-flash",
-              "gemini-3.5-flash",
-            ].filter((model, index, models) => models.indexOf(model) === index);
+          for (const item of rankedPassages.slice(0, 10)) {
+            const offsets = findQuoteOffsets(document.extractedText, item.passage);
+            if (!offsets) continue;
 
-            for (const model of citationModels) {
-              try {
-                quoteResponse = await gemini.models.generateContent({
-                  model,
-                  contents: quotePrompt,
-                  config: { temperature: 0.1 },
-                });
+            const duplicate = verifiedCitationsData.some(
+              (citation) =>
+                citation.startChar === offsets.startChar &&
+                citation.endChar === offsets.endChar
+            );
+            if (duplicate) continue;
+
+            let pageNumber = null;
+            for (const chunk of document.chunks) {
+              if (
+                offsets.startChar >= chunk.startChar &&
+                offsets.startChar <= chunk.endChar
+              ) {
+                pageNumber = chunk.pageNumber;
                 break;
-              } catch (error: any) {
-                const status = error?.status ?? error?.error?.code;
-                console.warn(
-                  `[Citation] Model ${model} failed with status ${status}. Trying next model immediately.`
-                );
               }
             }
 
-            if (!quoteResponse) {
-              throw new Error("Citation models unavailable; using local verification fallback.");
-            }
+            const citation = await prisma.citation.create({
+              data: {
+                messageId: assistantMessage.id,
+                documentId: document.id,
+                quote: document.extractedText.substring(
+                  offsets.startChar,
+                  offsets.endChar
+                ),
+                verified: true,
+                startChar: offsets.startChar,
+                endChar: offsets.endChar,
+                pageNumber,
+              },
+            });
 
-            const quoteText = quoteResponse.text || "";
-            const jsonMatch = quoteText.match(/\[\s*[\s\S]*?\s*\]/);
-            let candidates: string[] = [];
+            verifiedCitationsData.push({
+              id: citation.id,
+              quote: citation.quote,
+              verified: true,
+              startChar: citation.startChar,
+              endChar: citation.endChar,
+              pageNumber: citation.pageNumber,
+            });
 
-            if (jsonMatch) {
-              try {
-                const parsed = JSON.parse(jsonMatch[0]);
-                if (Array.isArray(parsed)) {
-                  candidates = parsed.filter(item => typeof item === "string");
-                }
-              } catch (e) {
-                console.error("[Citation] JSON parsing failed:", e);
-              }
-            } else {
-              console.warn("[Citation] No JSON array found in Gemini response.");
-            }
-
-            for (const candidate of candidates) {
-              if (!candidate.trim()) continue;
-
-              let offsets = findQuoteOffsets(document.extractedText, candidate);
-              let verifiedQuote = candidate;
-
-              // Fallback within Gemini candidate: If the whole candidate failed verification, attempt exact source sentences within it
-              if (!offsets && candidate.includes('.') && candidate.length > 50) {
-                const sentences = candidate.split(/[.!?]+/).map((s: string) => s.trim()).filter((s: string) => s.length > 15);
-                for (const sentence of sentences) {
-                  const sOffsets = findQuoteOffsets(document.extractedText, sentence);
-                  // Verify the sub-passage was actually in the context Gemini saw
-                  if (sOffsets && contextText.toLowerCase().includes(sentence.toLowerCase())) {
-                    offsets = sOffsets;
-                    verifiedQuote = sentence;
-                    break;
-                  }
-                }
-              }
-
-              if (offsets) {
-                let pageNumber = null;
-                for (const chunk of document.chunks) {
-                  if (offsets.startChar >= chunk.startChar && offsets.startChar <= chunk.endChar) {
-                    pageNumber = chunk.pageNumber;
-                    break;
-                  }
-                }
-
-                const citation = await prisma.citation.create({
-                  data: {
-                    messageId: assistantMessage.id,
-                    documentId: document.id,
-                    quote: document.extractedText.substring(offsets.startChar, offsets.endChar),
-                    verified: true,
-                    startChar: offsets.startChar,
-                    endChar: offsets.endChar,
-                    pageNumber,
-                  },
-                });
-
-                verifiedCitationsData.push({
-                  id: citation.id,
-                  quote: citation.quote,
-                  verified: true,
-                  startChar: citation.startChar,
-                  endChar: citation.endChar,
-                  pageNumber: citation.pageNumber,
-                });
-              } else {
-                console.log(`[Citation] Rejected: "${candidate.substring(0, 50)}..."`);
-              }
-            }
-
-            // --- Deterministic Fallback ---
-            // If primary Gemini extraction failed, select literal supporting evidence directly from retrieved chunks.
-            if (verifiedCitationsData.length === 0) {
-              console.log("[Citation] Primary Gemini extraction produced zero verified results. Attempting deterministic fallback...");
-
-              const questionTerms = getMeaningfulTerms(question);
-              const answerTerms = getMeaningfulTerms(accumulatedAnswer);
-
-              const candidatesWithScores: { text: string; score: number }[] = [];
-              const seenPassages = new Set<string>();
-
-              const chunksToScan = fullDocumentCoverage
-                ? [{ content: document.extractedText }]
-                : selectedChunks;
-
-              for (const chunk of chunksToScan) {
-                // Split into sentences using lookbehind for sentence-ending punctuation followed by whitespace.
-                const sentences = chunk.content.split(/(?<=[.!?])\s+/).map((s: string) => s.trim()).filter((s: string) => s.length >= 30 && s.length <= 400);
-
-                for (let i = 0; i < sentences.length; i++) {
-                  // Candidates: Single sentence or window of two adjacent sentences
-                  const windowCandidates = [sentences[i]];
-                  if (i < sentences.length - 1) {
-                    const combined = `${sentences[i]} ${sentences[i + 1]}`;
-                    if (combined.length <= 600) windowCandidates.push(combined);
-                  }
-
-                  for (const passage of windowCandidates) {
-                    if (seenPassages.has(passage)) continue;
-                    seenPassages.add(passage);
-
-                    let score = 0;
-                    const pLower = passage.toLowerCase();
-
-                    // Weight question terms 2x, answer terms 1x
-                    for (const term of questionTerms) {
-                      if (pLower.includes(term)) score += 2;
-                    }
-                    for (const term of answerTerms) {
-                      if (pLower.includes(term)) score += 1;
-                    }
-
-                    if (score > 0) {
-                      candidatesWithScores.push({ text: passage, score });
-                    }
-                  }
-                }
-              }
-
-              // Sort by score descending and take top candidates
-              candidatesWithScores.sort((a, b) => b.score - a.score);
-              console.log(`[Citation] Fallback evaluated ${seenPassages.size} unique literal passages, found ${candidatesWithScores.length} with meaningful overlap.`);
-
-              const MIN_RELEVANCE_SCORE = 3;
-              let fallbackFound = 0;
-
-              for (const item of candidatesWithScores.slice(0, 5)) {
-                if (item.score < MIN_RELEVANCE_SCORE) break;
-
-                const offsets = findQuoteOffsets(document.extractedText, item.text);
-                if (offsets) {
-                  // Deduplicate against existing results (though verifiedCitationsData is empty here)
-                  const isDuplicate = verifiedCitationsData.some(vc => vc.startChar === offsets.startChar && vc.endChar === offsets.endChar);
-                  if (isDuplicate) continue;
-
-                  let pageNumber = null;
-                  for (const chunk of document.chunks) {
-                    if (offsets.startChar >= chunk.startChar && offsets.startChar <= chunk.endChar) {
-                      pageNumber = chunk.pageNumber;
-                      break;
-                    }
-                  }
-
-                  const citation = await prisma.citation.create({
-                    data: {
-                      messageId: assistantMessage.id,
-                      documentId: document.id,
-                      quote: document.extractedText.substring(offsets.startChar, offsets.endChar),
-                      verified: true,
-                      startChar: offsets.startChar,
-                      endChar: offsets.endChar,
-                      pageNumber,
-                    },
-                  });
-
-                  verifiedCitationsData.push({
-                    id: citation.id,
-                    quote: citation.quote,
-                    verified: true,
-                    startChar: citation.startChar,
-                    endChar: citation.endChar,
-                    pageNumber: citation.pageNumber,
-                  });
-
-                  fallbackFound++;
-                  if (fallbackFound >= 2) break; // Limit fallback results
-                }
-              }
-
-              if (fallbackFound > 0) {
-                console.log(`[Citation] Deterministic fallback successfully verified ${fallbackFound} citations.`);
-              } else {
-                console.log("[Citation] Deterministic fallback failed to find sufficiently relevant and verifiable citations.");
-              }
-            }
-          } catch (e) {
-            console.error("Citation verification logic failed:", e);
-
-            // The citation-model call can fail independently (for example, a temporary
-            // provider 503). In that case, still verify literal evidence locally.
-            if (verifiedCitationsData.length === 0) {
-              console.log("[Citation] Citation model failed. Attempting local deterministic fallback...");
-
-              const questionTerms = getMeaningfulTerms(question);
-              const answerTerms = getMeaningfulTerms(accumulatedAnswer);
-              const sourceText = fullDocumentCoverage
-                ? document.extractedText
-                : selectedChunks.map((chunk) => chunk.content).join("\\n\\n");
-
-              const passages = sourceText
-                .split(/(?<=[.!?])\\s+/)
-                .map((passage: string) => passage.trim())
-                .filter((passage: string) => passage.length >= 30 && passage.length <= 600);
-
-              const rankedPassages = passages
-                .map((passage: string) => {
-                  const lower = passage.toLowerCase();
-                  let score = 0;
-                  for (const term of questionTerms) {
-                    if (lower.includes(term)) score += 2;
-                  }
-                  for (const term of answerTerms) {
-                    if (lower.includes(term)) score += 1;
-                  }
-                  return { passage, score };
-                })
-                .filter((item: { passage: string; score: number }) => item.score >= 3)
-                .sort((a: { score: number }, b: { score: number }) => b.score - a.score);
-
-              for (const item of rankedPassages.slice(0, 5)) {
-                const offsets = findQuoteOffsets(document.extractedText, item.passage);
-                if (!offsets) continue;
-
-                const duplicate = verifiedCitationsData.some(
-                  (citation) =>
-                    citation.startChar === offsets.startChar &&
-                    citation.endChar === offsets.endChar
-                );
-                if (duplicate) continue;
-
-                let pageNumber = null;
-                for (const chunk of document.chunks) {
-                  if (
-                    offsets.startChar >= chunk.startChar &&
-                    offsets.startChar <= chunk.endChar
-                  ) {
-                    pageNumber = chunk.pageNumber;
-                    break;
-                  }
-                }
-
-                const citation = await prisma.citation.create({
-                  data: {
-                    messageId: assistantMessage.id,
-                    documentId: document.id,
-                    quote: document.extractedText.substring(
-                      offsets.startChar,
-                      offsets.endChar
-                    ),
-                    verified: true,
-                    startChar: offsets.startChar,
-                    endChar: offsets.endChar,
-                    pageNumber,
-                  },
-                });
-
-                verifiedCitationsData.push({
-                  id: citation.id,
-                  quote: citation.quote,
-                  verified: true,
-                  startChar: citation.startChar,
-                  endChar: citation.endChar,
-                  pageNumber: citation.pageNumber,
-                });
-
-                if (verifiedCitationsData.length >= 2) break;
-              }
-
-              console.log(
-                `[Citation] Local failure fallback verified ${verifiedCitationsData.length} citation(s).`
-              );
-            }
+            if (verifiedCitationsData.length >= 3) break;
           }
+
+          console.log(
+            `[Citation] Local verifier produced ${verifiedCitationsData.length} verified citation(s).`
+          );
         }
 
         controller.enqueue(
