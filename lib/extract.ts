@@ -87,11 +87,16 @@ async function extractPdf(
       (globalThis as any).Path2D = canvas.Path2D;
     }
 
-    // Import pdf-parse only AFTER the required globals exist.
+    // pdf-parse requires its worker to be initialized explicitly in
+    // serverless environments such as Vercel.
+    const worker = await import("pdf-parse/worker");
     const { PDFParse } = await import("pdf-parse");
+
+    PDFParse.setWorker(worker.getData());
 
     parser = new PDFParse({
       data: buffer,
+      CanvasFactory: worker.CanvasFactory,
     });
 
     const result = await parser.getText();
