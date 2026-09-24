@@ -19,7 +19,9 @@ It allows users to upload PDF and DOCX contracts, ask grounded questions about t
 
 ## Live Demo
 
-The production deployment is hosted on Vercel. If you are reviewing this project for a role, the fastest way to evaluate it is to try a processed contract, ask a question, inspect a verified citation, and open the highlighted source passage.
+Vercel profile: https://vercel.com/perdurabo
+
+The production deployment is hosted on Vercel. If you are reviewing this project for a role, the fastest way to evaluate it is to open the ContractLens project from my Vercel profile, try a processed contract, ask a question, inspect a verified citation, and open the highlighted source passage.
 
 
 ## Core Principle
