@@ -1,8 +1,26 @@
 # ContractLens
 
-ContractLens is an AI-powered legal contract analysis web application built for the engineering assignment.
+ContractLens is a production-ready AI contract analysis platform focused on grounded answers, independently verified evidence, multi-document reasoning, clause-level comparison, and agentic document research.
 
-It allows users to upload PDF and DOCX contracts, ask grounded questions about their contents, receive streaming AI answers backed by independently verified quotations, compare multiple documents, inspect clause-level differences, and perform multi-round agentic document research.
+It allows users to upload PDF and DOCX contracts, ask grounded questions about their contents, receive streaming AI answers backed by independently verified quotations, compare multiple documents, inspect clause-level differences, and perform multi-round research workflows.
+
+## Portfolio Highlights
+
+- Production deployment on Vercel
+- PDF and DOCX ingestion with processing states
+- Large-document chunking and retrieval
+- Streaming contract Q&A with saved history
+- Independently verified citations with source highlighting
+- Multi-document comparative Q&A
+- Clause/paragraph-level document comparison
+- Agentic research with bounded tool-use rounds
+- PostgreSQL persistence with Prisma
+- Graceful provider-failure fallbacks
+
+## Live Demo
+
+The production deployment is hosted on Vercel. If you are reviewing this project for a role, the fastest way to evaluate it is to try a processed contract, ask a question, inspect a verified citation, and open the highlighted source passage.
+
 
 ## Core Principle
 
