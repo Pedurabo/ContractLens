@@ -197,11 +197,31 @@ User Question: ${question}
         let isStopped = false;
 
         try {
-          const responseStream = await gemini.models.generateContentStream({
-            model: GEMINI_MODEL,
-            contents: prompt,
-            config: { temperature: 0.1 },
-          });
+          const models = Array.from(new Set([
+            GEMINI_MODEL,
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash-lite",
+          ]));
+          let responseStream: any = null;
+          let lastError: unknown = null;
+
+          for (const model of models) {
+            try {
+              responseStream = await gemini.models.generateContentStream({
+                model,
+                contents: prompt,
+                config: { temperature: 0.1 },
+              });
+              break;
+            } catch (error: any) {
+              lastError = error;
+              const status = Number(error?.status || error?.code || 0);
+              if (![429, 500, 502, 503, 504].includes(status)) throw error;
+              console.warn(`[Multi-Chat] ${model} unavailable (${status}); trying fallback.`);
+            }
+          }
+
+          if (!responseStream) throw lastError || new Error("No Gemini model available.");
 
           controller.enqueue(
             encoder.encode(JSON.stringify({
@@ -247,220 +267,77 @@ User Question: ${question}
         const verifiedCitationsData: any[] = [];
 
         if (accumulatedAnswer) {
-          try {
-            const quotePrompt = `You are an expert contract analyzer. Your task is to extract the EXACT verbatim quotations from the provided contracts that support the answer below.
+          const questionTerms = getMeaningfulTerms(question);
+          const answerTerms = getMeaningfulTerms(accumulatedAnswer);
 
-INSTRUCTIONS:
-1. COPY supporting text DIRECTLY from the document contents provided.
-2. DO NOT paraphrase, fix grammar, or alter punctuation.
-3. DO NOT use ellipses (...) or skip words.
-4. For each citation, specify the EXACT corresponding documentId and the literal quotation text.
-5. If no exact match can be found, return an empty array [].
+          for (const doc of documents) {
+            const docContext = docContextMap.get(doc.id);
+            if (!docContext) continue;
 
-OUTPUT FORMAT:
-Return ONLY a valid JSON array of objects. Do not include markdown formatting or explanation. Each object must have "documentId" and "quote" properties.
+            const source = docContext.fullCoverage
+              ? doc.extractedText
+              : docContext.selectedChunks.map((chunk) => chunk.content).join("\n\n");
 
-Example format:
-[
-  { "documentId": "some-id-123", "quote": "verbatim text here" }
-]
-
-Contracts Content:
-${promptSourcesText}
-
-Answer to support:
-${accumulatedAnswer}
-`;
-
-            const quoteResponse = await gemini.models.generateContent({
-              model: GEMINI_MODEL,
-              contents: quotePrompt,
-              config: { temperature: 0.1 },
-            });
-
-            const quoteText = quoteResponse.text || "";
-            const jsonMatch = quoteText.match(/\[\s*[\s\S]*?\s*\]/);
-            let candidates: { documentId: string; quote: string }[] = [];
-
-            if (jsonMatch) {
-              try {
-                const parsed = JSON.parse(jsonMatch[0]);
-                if (Array.isArray(parsed)) {
-                  candidates = parsed.filter((item: any) => item && typeof item === "object" && typeof item.documentId === "string" && typeof item.quote === "string");
-                }
-              } catch (e) {
-                console.error("[Multi-Citation] JSON parsing failed:", e);
-              }
-            }
-
-            const uniqueRequestedIds = new Set(uniqueIds);
-
-            for (const candidate of candidates) {
-              if (!candidate.quote.trim()) continue;
-              if (!uniqueRequestedIds.has(candidate.documentId)) {
-                console.log(`[Multi-Citation] Rejected due to invalid documentId reference: ${candidate.documentId}`);
-                continue;
-              }
-
-              const targetDoc = documents.find(d => d.id === candidate.documentId);
-              if (!targetDoc) continue;
-
-              let offsets = findQuoteOffsets(targetDoc.extractedText, candidate.quote);
-
-              if (offsets) {
-                const isDuplicate = verifiedCitationsData.some(vc => vc.documentId === candidate.documentId && vc.startChar === offsets!.startChar && vc.endChar === offsets!.endChar);
-                if (isDuplicate) continue;
-
-                let pageNumber = null;
-                for (const chunk of targetDoc.chunks) {
-                  if (offsets.startChar >= chunk.startChar && offsets.startChar <= chunk.endChar) {
-                    pageNumber = chunk.pageNumber;
-                    break;
+            const passages = source
+              .split(/(?<=[.!?])\s+|\n+/)
+              .map((passage) => passage.trim())
+              .filter((passage) => passage.length >= 20 && passage.length <= 700)
+              .map((passage) => {
+                const lower = passage.toLowerCase();
+                let questionScore = 0;
+                let score = 0;
+                for (const term of questionTerms) {
+                  if (lower.includes(term)) {
+                    questionScore += 1;
+                    score += 3;
                   }
                 }
+                for (const term of answerTerms) {
+                  if (lower.includes(term)) score += 1;
+                }
+                return { passage, questionScore, score };
+              })
+              .filter((item) => item.questionScore > 0 && item.score >= 4)
+              .sort((a, b) => b.score - a.score);
 
-                const citation = await prisma.citation.create({
-                  data: {
-                    messageId: assistantMessage.id,
-                    documentId: targetDoc.id,
-                    quote: targetDoc.extractedText.substring(offsets.startChar, offsets.endChar),
-                    verified: true,
-                    startChar: offsets.startChar,
-                    endChar: offsets.endChar,
-                    pageNumber,
-                  },
-                });
+            for (const item of passages.slice(0, 10)) {
+              const offsets = findQuoteOffsets(doc.extractedText, item.passage);
+              if (!offsets) continue;
 
-                verifiedCitationsData.push({
-                  id: citation.id,
-                  documentId: targetDoc.id,
-                  documentName: targetDoc.name,
-                  quote: citation.quote,
+              const duplicate = verifiedCitationsData.some(
+                (citation) =>
+                  citation.documentId === doc.id &&
+                  citation.startChar === offsets.startChar &&
+                  citation.endChar === offsets.endChar
+              );
+              if (duplicate) continue;
+
+              const citation = await prisma.citation.create({
+                data: {
+                  messageId: assistantMessage.id,
+                  documentId: doc.id,
+                  quote: doc.extractedText.substring(offsets.startChar, offsets.endChar),
                   verified: true,
-                  startChar: citation.startChar,
-                  endChar: citation.endChar,
-                });
-              } else {
-                console.log(`[Multi-Citation] Rejected verbatim match for document ${targetDoc.name}: "${candidate.quote.substring(0, 50)}..."`);
-              }
+                  startChar: offsets.startChar,
+                  endChar: offsets.endChar,
+                  pageNumber: null,
+                },
+              });
+
+              verifiedCitationsData.push({
+                id: citation.id,
+                documentId: doc.id,
+                documentName: doc.name,
+                quote: citation.quote,
+                verified: true,
+                startChar: citation.startChar,
+                endChar: citation.endChar,
+              });
+              break;
             }
-
-            // --- Deterministic Fallback ---
-            // If primary citation extraction produced zero verified entries, fallback programmatically
-            if (verifiedCitationsData.length === 0) {
-              console.log("[Multi-Citation] Primary Gemini extraction produced zero verified results. Attempting cross-document deterministic fallback...");
-
-              const questionTerms = getMeaningfulTerms(question);
-              const answerTerms = getMeaningfulTerms(accumulatedAnswer);
-
-              const candidatesWithScores: { text: string; score: number; documentId: string; documentName: string; targetDoc: any }[] = [];
-              const seenPassages = new Set<string>();
-
-              for (const doc of documents) {
-                const docContext = docContextMap.get(doc.id);
-                if (!docContext) continue;
-
-                const chunksToScan = docContext.fullCoverage
-                  ? [{ content: doc.extractedText }]
-                  : docContext.selectedChunks;
-
-                for (const chunk of chunksToScan) {
-                  const sentences = chunk.content.split(/(?<=[.!?])\s+/).map((s: string) => s.trim()).filter((s: string) => s.length >= 30 && s.length <= 400);
-
-                  for (let i = 0; i < sentences.length; i++) {
-                    const windowCandidates = [sentences[i]];
-                    if (i < sentences.length - 1) {
-                      const combined = `${sentences[i]} ${sentences[i + 1]}`;
-                      if (combined.length <= 600) windowCandidates.push(combined);
-                    }
-
-                    for (const passage of windowCandidates) {
-                      const dedupeKey = `${doc.id}::${passage}`;
-                      if (seenPassages.has(dedupeKey)) continue;
-                      seenPassages.add(dedupeKey);
-
-                      let score = 0;
-                      const pLower = passage.toLowerCase();
-
-                      for (const term of questionTerms) {
-                        if (pLower.includes(term)) score += 2;
-                      }
-                      for (const term of answerTerms) {
-                        if (pLower.includes(term)) score += 1;
-                      }
-
-                      if (score > 0) {
-                        candidatesWithScores.push({
-                          text: passage,
-                          score,
-                          documentId: doc.id,
-                          documentName: doc.name,
-                          targetDoc: doc,
-                        });
-                      }
-                    }
-                  }
-                }
-              }
-
-              candidatesWithScores.sort((a, b) => b.score - a.score);
-              console.log(`[Multi-Citation] Fallback evaluated ${seenPassages.size} unique literal passages across contracts, found ${candidatesWithScores.length} with overlap.`);
-
-              const MIN_RELEVANCE_SCORE = 3;
-              let fallbackFound = 0;
-
-              for (const item of candidatesWithScores.slice(0, 6)) {
-                if (item.score < MIN_RELEVANCE_SCORE) break;
-
-                const offsets = findQuoteOffsets(item.targetDoc.extractedText, item.text);
-                if (offsets) {
-                  const isDuplicate = verifiedCitationsData.some(vc => vc.documentId === item.documentId && vc.startChar === offsets!.startChar && vc.endChar === offsets!.endChar);
-                  if (isDuplicate) continue;
-
-                  let pageNumber = null;
-                  for (const chunk of item.targetDoc.chunks) {
-                    if (offsets.startChar >= chunk.startChar && offsets.startChar <= chunk.endChar) {
-                      pageNumber = chunk.pageNumber;
-                      break;
-                    }
-                  }
-
-                  const citation = await prisma.citation.create({
-                    data: {
-                      messageId: assistantMessage.id,
-                      documentId: item.documentId,
-                      quote: item.targetDoc.extractedText.substring(offsets.startChar, offsets.endChar),
-                      verified: true,
-                      startChar: offsets.startChar,
-                      endChar: offsets.endChar,
-                      pageNumber,
-                    },
-                  });
-
-                  verifiedCitationsData.push({
-                    id: citation.id,
-                    documentId: item.documentId,
-                    documentName: item.documentName,
-                    quote: citation.quote,
-                    verified: true,
-                    startChar: citation.startChar,
-                    endChar: citation.endChar,
-                  });
-
-                  fallbackFound++;
-                  if (fallbackFound >= 3) break; // Allow up to 3 valid fallback citations across docs
-                }
-              }
-
-              if (fallbackFound > 0) {
-                console.log(`[Citation] Deterministic fallback successfully verified ${fallbackFound} citations.`);
-              } else {
-                console.log("[Citation] Deterministic fallback found no sufficiently relevant verifiable cross-document citations.");
-              }
-            }
-          } catch (e) {
-            console.error("Multi-document citation extraction/fallback failed:", e);
           }
+
+          console.log(`[Multi-Citation] Local verifier produced ${verifiedCitationsData.length} verified citation(s).`);
         }
 
         controller.enqueue(
