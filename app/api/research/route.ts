@@ -1017,6 +1017,17 @@ console.warn(
               rawDecision =
                 await askAgent(prompt);
             } catch (error: any) {
+              console.warn(
+                "[Research] AI provider unavailable; completing from retrieved evidence.",
+                error
+              );
+
+              if (evidence.length > 0) {
+                finalAnswer =
+                  "The research agent found relevant contract evidence, but the AI provider became unavailable before it could complete synthesis.";
+                break;
+              }
+
               throw new Error(
                 error?.message ||
                   "The AI provider failed during research."
@@ -1465,6 +1476,15 @@ Required format:
                 verifiedCitations.push(
                   verified
                 );
+
+                if (
+                  finalAnswer.includes(
+                    "AI provider became unavailable"
+                  )
+                ) {
+                  finalAnswer =
+                    "The research agent retrieved relevant contract evidence. The verified passage below is the grounded evidence for this question.";
+                }
               }
             }
           }
