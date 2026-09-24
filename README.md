@@ -8,7 +8,7 @@ It allows users to upload PDF and DOCX contracts, ask grounded questions about t
 
 ContractLens does not trust an AI model's citation claims by default.
 
-When Gemini returns a quotation, the application independently searches the original extracted document text for that quotation. Only quotations that can be matched back to the source document are displayed as verified citations.
+The application independently searches the original extracted document text for every candidate quotation. Single- and multi-document Q&A use deterministic local evidence selection after answer generation, while comparison and research outputs are also independently checked before display. Only quotations that can be matched back to the source document are displayed as verified citations.
 
 This provides a stronger grounding layer than simply asking the model to provide page numbers, offsets, or citations.
 
@@ -21,7 +21,7 @@ This provides a stronger grounding layer than simply asking the model to provide
 - Upload PDF and DOCX files.
 - Reject unsupported file types.
 - Extract text from uploaded documents.
-- Store documents and chunks locally using SQLite and Prisma.
+- Store documents, chunks, chats, and citations in PostgreSQL using Prisma.
 - Track PROCESSING, PROCESSED, and FAILED states.
 - Detect PDFs with no meaningful readable text, including image-only/scanned PDFs.
 - View uploaded documents in a document library.
@@ -154,7 +154,7 @@ For each round:
 
 The agent has a maximum budget of six rounds.
 
-The UI displays live research activity so the user can see which tools the agent is using.
+The UI displays live research activity so the user can see which tools the agent is using. If Gemini becomes temporarily unavailable during research, the server can fall back to local document search over stored chunks and still return independently verified evidence rather than hanging indefinitely.
 
 Malformed tool responses and duplicate tool calls are handled by the server rather than blindly executed.
 
@@ -176,7 +176,7 @@ A quotation is displayed as verified only when the server can locate it in the e
 
 Unverified model-generated quotations are rejected.
 
-This means Gemini is responsible for reasoning, while the application itself is responsible for determining whether cited evidence genuinely exists in the uploaded contract.
+This separates model reasoning from evidence integrity: the application itself determines whether cited evidence genuinely exists in the uploaded contract.
 
 ---
 
@@ -188,10 +188,32 @@ This means Gemini is responsible for reasoning, while the application itself is 
 - Tailwind CSS
 - Gemini API via `@google/genai`
 - Prisma 7
-- SQLite
+- PostgreSQL (Prisma Postgres in production)
+- `@prisma/adapter-pg`
 - `pdf-parse`
 - `mammoth`
 - `react-markdown`
+
+---
+
+## Environment Variables
+
+Create a local `.env` file (never commit secrets):
+
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE"
+GEMINI_API_KEY="your-gemini-api-key"
+GEMINI_MODEL="gemini-3.5-flash-lite"
+```
+
+Production is deployed on Vercel with PostgreSQL/Prisma Postgres and the required environment variables configured in the deployment environment.
+
+## Known Limitations
+
+- Scanned/image-only PDFs are detected and reported, but OCR is not implemented.
+- Clause matching is structural and heuristic. Semantically similar clauses with different headings may occasionally appear as separate added/removed items rather than one modified pair.
+- The agentic research trace is authoritative for tool activity; the small summary label may not always enumerate locally executed fallback tools.
+- Research intentionally does not claim full-document absence when only retrieved sections were substantively inspected.
 
 ---
 
