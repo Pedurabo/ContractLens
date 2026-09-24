@@ -118,9 +118,15 @@ export default function ResearchPage() {
             } else if (event.type === "final") {
               setFinalAnswer(event.answer || "");
               setCitations(event.citations || []);
-              setRoundsUsed(event.roundsUsed || 0);
-              setToolsUsed(event.toolsUsed || []);
+              setRoundsUsed(event.roundsCompleted || event.roundsUsed || 0);
+              setToolsUsed(
+                event.toolsUsed ||
+                  Array.from(new Set(activities.map((item) => item.tool)))
+              );
               setStatusMessage("Research complete.");
+            } else if (event.type === "error") {
+              setError(event.error || "Research agent request failed.");
+              setStatusMessage("Research failed.");
             }
           } catch (jsonErr) {
             console.error("Failed to parse event turn line:", jsonErr);
