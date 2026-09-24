@@ -429,7 +429,7 @@ export default function Home() {
                   onClick={() =>
                     openDocument(doc)
                   }
-                  className={`flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition ${
+                  className={`flex items-center justify-between rounded-2xl border bg-white p-5 shadow-sm transition ${selectedDocIds.has(doc.id) ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200"} ${
                     doc.status === "PROCESSED"
                       ? "cursor-pointer hover:border-blue-300 hover:shadow-md"
                       : "cursor-default"
